@@ -21,11 +21,14 @@ import time
 from utils.autoanchor import check_anchor_order
 
 
+
+
 logger = logging.getLogger(__name__)
 
 class Model(keras.models.Model):
-    def __init__(self,cfg='/models/yolov5s.yaml',ch=3,nc=None):
+    def __init__(self,cfg='/models/yolov5s.yaml',ch=3,nc=None,format='NCHW'):
         super(Model,self).__init__()
+        self.format=format
         if isinstance(cfg,dict):
             yaml = cfg
         else :
@@ -38,23 +41,26 @@ class Model(keras.models.Model):
         if(nc and nc!= yaml['nc']):
             logger.info('Overriding model.yaml nc=%g with nc=%g' % (yaml['nc'],nc))
         
-        self.model , self.save = parse_model(yaml,ch=[ch])
+        self.model , self.savelist = parse_model(yaml,ch=[ch])
         
         self.names = [str(i) for i in range(yaml['nc'])] 
         
-        m = self.model[-1] #获取detect()层
-        if isinstance(m,Detect):
-            s = 128
-        
-            call = self.call(tf.zeros([1,ch,s,s]))
+        # m = self.model[-1] #获取detect()层
+        # tensorflow会走 forward_once ，不要画蛇添足
+        # if isinstance(m,Detect):
+        #     s = 128
+
+        #     # format有 number ,channel, height,width以及 number , height,width,channel,俩种格式
+             
+        #     call = self.call(tf.zeros([1,ch,s,s]) if (format == 'NCHW') else tf.zeros([1,s,s,ch]))
         
             
-            stridearray = [s / x.shape[-2] for x in call]
-            m.stride=tf.convert_to_tensor(stridearray)
+        #     stridearray = [s / x.shape[-2] for x in call]
+        #     m.stride=tf.convert_to_tensor(stridearray)
             
-            m.anchors /= tf.reshape(m.stride,[-1,1,1])
-            check_anchor_order(m)
-            self.stride = m.stride 
+        #     m.anchors /= tf.reshape(m.stride,[-1,1,1] )
+        #     check_anchor_order(m)
+        #     self.stride = m.stride 
             #tensorflow似乎不需要我来配置weights
             # self._initialize_biases()
         
@@ -95,6 +101,7 @@ class Model(keras.models.Model):
         # 这个i用来判断当前的m是否需要被保存下来
         
         i=0
+        
         for m in self.model.layers:
             i+=1
             if(m.f != -1):
@@ -124,12 +131,17 @@ class Model(keras.models.Model):
             #似乎tensorflow无法使用不同的数组来反复调用同一个layers，会被维度检验卡住。。。不知道有没有好的解决办法
             # if(not isinstance(x,Detect)):
                 # input_shape = x.shape
-                
+            
+          
+            
+           
             x = m(x)
           
+        
+            
             # 1,64,32,32
             # 1,128,16,16
-            y.append(x if m.i in self.save else None)
+            y.append(x if m.i in self.savelist else None)
             
         return x
     def _initialize_biases(self,cf=None):
@@ -176,7 +188,7 @@ class Model(keras.models.Model):
         
 def parse_model(d, ch):  # model_dict, input_channels(3)
     # 被跳过的str，读取yaml中有一些属性是string字符串格式，这些字符串需要被跳过
-    jumpStr=['nearest','channels_first']
+    jumpStr=['nearest','channels_first','channels_last']
     
     logger.info('\n%3s%18s%3s%10s  %-40s%-30s' % ('', 'from', 'n', 'params', 'module', 'arguments'))
     anchors,nc,gd,gw = d['anchors'],d['nc'],d['depth_multiple'],d['width_multiple']

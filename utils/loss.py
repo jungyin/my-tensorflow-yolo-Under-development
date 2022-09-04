@@ -65,7 +65,7 @@ def build_targets(preds, targets, model):
             t= t[j]
             offsets = (np.zeros_like(gxy)[None] + off[:, None])[j]
         else : #如果没有，取anchor 第一个索引？不太像啊
-            t = targets[0]
+            t = targets[0].numpy()
             offsets = 0
         
         #Define

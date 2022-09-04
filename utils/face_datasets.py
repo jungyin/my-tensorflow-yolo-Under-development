@@ -29,6 +29,7 @@ for orientation in ExifTags.TAGS.keys():
         break
 
 
+
 logger = logging.getLogger(__name__)
 # from utils.tensorflow_utils import 
 tf.data.Dataset
@@ -47,6 +48,20 @@ def img2label_paths(img_paths):
 def get_hash(files):
     return sum(os.path.getsize(f) for f in files if os.path.isfile(f))
 
+def exif_size(img):
+    # Returns exif-corrected PIL size
+    s = img.size  # (width, height)
+    try:
+        rotation = dict(img._getexif().items())[orientation]
+        if rotation == 6:  # rotation 270
+            s = (s[1], s[0])
+        elif rotation == 8:  # rotation 90
+            s = (s[1], s[0])
+    except:
+        pass
+
+    return s
+
 def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=False, cache=False, pad=0.0, rect=False,
                       rank=-1, world_size=1, workers=8, image_weights=False, quad=False, prefix=''):
     # with tensorflow_distributed_zero_first(rank):
@@ -61,7 +76,7 @@ def create_dataloader(path, imgsz, batch_size, stride, opt, hyp=None, augment=Fa
                                       single_cls=opt.single_cls,
                                       stride=int(stride),
                                       pad=pad,
-                                      image_weights=image_weights,
+                                      image_weights=image_weights
                                     )
     
     batch_size = min(batch_size, len(dataset))
@@ -134,14 +149,14 @@ class LoadFaceImagesAndLabels(Sequence):
       
         assert nf > 0 or not augment, f'No labels found {nf} . Can not train without labels.'
         
-        self.label_files = img2label_paths(cache.keys())  # update
+        self.label_files = img2label_paths(self.img_files)  # update
         
         # 如果只有一个类，那就把x的所有第二维数组变成0？
         if(single_cls):
             for x in self.labels:
                 x[:, 0]=0
                 
-        bi = np.floor(np.arange(n) / batch_size).astype(np.int) #当前batch 下标
+        bi = np.floor(np.arange(n) / batch_size).astype(np.int) # 计算所在batch的下标
         nb = bi[-1] + 1 #batch有多少个
         self.batch = bi # 在图片中，当前batch下标？感觉不太怼
         self.n = n # 当前图片总量
@@ -355,7 +370,8 @@ class LoadFaceImagesAndLabels(Sequence):
                 # verify images
                 im = Image.open(im_file)
                 im.verify()  # PIL verify
-                shape = im.size  # image size
+                shape = exif_size(im)  # image size
+                im.close()
                 
                 assert (shape[0] > 9) & (shape[1] > 9), 'image size <10 pixels'
 
@@ -444,7 +460,7 @@ def load_mosaic_face(self,index):
     
     
     indices = [index] + [ randint(0, self.n - 1 )  for _ in range(3)]  #3个随机的图像附加索引
-    
+    # indices = [1268,952,1943]
     # 我tm一个飞刀，找了半天是这里吧index给改了
     
     for i, index in enumerate(indices):

@@ -37,6 +37,12 @@ from utils.tensorflow_utils import ModelEMA
 import gc
 
 
+import os
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+
+print('gpu可用',end='')
+print(tf.test.is_gpu_available)
+
 logger = logging.getLogger(__name__)
 
 try:
@@ -77,10 +83,10 @@ def train(hyp,opt,wandb=None):
     
     results_file = save_dir / 'results.txt'
     
-    with open(save_dir/'hyp.yaml','w') as f:
-        yaml.dump(hyp,f,sort_keys=False)
-    with open(save_dir/'opt.yaml','w') as f:
-        yaml.dump(vars(opt),f,sort_keys=False)
+    # with open(save_dir/'hyp.yaml','w') as f:
+        # yaml.dump(hyp,f,sort_keys=False)
+    # with open(save_dir/'opt.yaml','w') as f:
+        # yaml.dump(vars(opt),f,sort_keys=False)
     
     plots = not opt.evolve
     # cuda = device.typ != 'cpu'
@@ -105,14 +111,14 @@ def train(hyp,opt,wandb=None):
             # 如果在配置表里有anchors，就更换掉model中已有的anchors
             ckpt['model'].yaml['anchors'] = round(hyp['anchors'])
         # 初始化model
-        model = Model(opt.cfg or ckpt['model'].yaml,ch=3,nc=nc)
+        model = Model(opt.cfg or ckpt['model'].yaml,ch=3,nc=nc,format=opt.format)
         exclude = ['anchor'] if opt.cfg or hyp.get('anchors') else[]
         state_dict = ckpt['model'].float().state_dict# 将配置表中配的参修改为float类型
         state_dict = intersect_dicts(state_dict,strict=False)
         # model.load_state_dict(state_dict,strict=False)
         
     else:
-        model = Model(opt.cfg,ch=3,nc=nc)
+        model = Model(opt.cfg,ch=3,nc=nc,format=opt.format)
     
   
     
@@ -156,10 +162,15 @@ def train(hyp,opt,wandb=None):
         # if ckpt['optimizer'] is not None:
             # optimizer.load_state_dict(ckpt['optimizer'])
     
-    gs = int(max(model.stride))
+    
+    # 步进，正常应该是在里面算，不过，这里先丢出来吧
+    # gs = int(max(model.stride))
+    gs = 32
     imgsz, imgsz_test = [check_img_size(x,gs) for x in opt.img_size]
     
-    model.build([batch_size,3,imgsz,imgsz])
+    
+    model.build([1,128,128,3])
+    
     
     model.summary()
     # model.load_weights()
@@ -177,10 +188,12 @@ def train(hyp,opt,wandb=None):
     
     mlc = np.concatenate(dataset.labels,0)[:, 0].max() #确认可能性最大的class
     # ema=None
-    nb = len(dataset) // batch_size # number of batches 当前数据按照batchs分了后需要轮读几次才能全部读取完，跑完一个epochs
+    
+    dl = len(dataset) #  data len 当前图片数据的总个数
+    nb = dl // batch_size # number of batches 当前数据按照batchs分了后需要轮读几次才能全部读取完，跑完一个epochs
     if (len(dataset)%batch_size!=0) :
         nb+=1
-    dl = len(dataset) #  data len 当前图片数据的总个数
+    
     
     
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (mlc, nc, opt.data, nc - 1)
@@ -196,7 +209,8 @@ def train(hyp,opt,wandb=None):
             labels = np.concatenate(dataset.labels,0)
             
             if plots :
-                plot_labels(labels, save_dir, loggers)
+                pass
+                # plot_labels(labels, save_dir, loggers)
                 # if tb_writer:
                 #     tb_writer.add_histogram('classes', labels[:, 0], 0)
     
@@ -263,11 +277,14 @@ def train(hyp,opt,wandb=None):
                 # 下表从0开始，删一个
                 if(imgi < dl ):
                     img,target,path = dataset.__getitem__(imgi)
-                
+                    # 在getitem里改图片的shape有点困难，还是在外面改吧
+                    if(opt.format=='NHWC'):
+                        img = tf.transpose(img,perm=[1,2,0]).numpy()
+                    
                     imgs.append(img)
                     targets.append(target)
                     paths.append(path)
-                    batch_size+=1
+                    
 
             (imgs, targets, paths) =  dataset.collate_fn(imgs,targets,paths)
             
@@ -338,12 +355,13 @@ def train(hyp,opt,wandb=None):
                 
                 mem = '%.3G' % ( pynvml.nvmlDeviceGetMemoryInfo(handle).used  / 1E9 if useGpu else 0)
                 s = ('%10s' * 2 + '%10.4g' * 7) % (
-                    '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1])
+                    '%g/%g' % (epoch, epochs - 1), mem, *mloss, targets.shape[0], imgs.shape[-1] if opt.format == 'NCHW' else imgs.shape[1])
                 pbar.set_description(s)
             # Plot
                 if plots and ni < 3:
                     f = save_dir / f'train_batch{ni}.jpg'  # filename
-                    Thread(target=plot_images, args=(imgs, targets, paths, f), daemon=True).start()
+                    f = ''
+                    Thread(target=plot_images, args=(imgs, targets, paths, f, opt.format), daemon=True).start()
                     # if tb_writer:
                     #     tb_writer.add_image(f, result, dataformats='HWC', global_step=epoch)
                     #     tb_writer.add_graph(model, imgs)  # add model to tensorboard
@@ -354,7 +372,8 @@ def train(hyp,opt,wandb=None):
             del imgs, targets, paths
             # # 跑完一次epoch记得gc叫出来一下，做个深度清理
             gc.collect()
-                    
+        
+    model.save("mask_detector.h5", save_format="tf")
 
 
 if __name__ == '__main__':
@@ -366,9 +385,9 @@ if __name__ == '__main__':
     parser.add_argument('--cfg', type=str, default='models/yolov5s.yaml', help='model.yaml path')
     parser.add_argument('--data', type=str, default='data/widerface.yaml', help='data.yaml path')
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.yaml', help='hyperparameters path')
-    parser.add_argument('--epochs', type=int, default=21)
-    parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs')
-    parser.add_argument('--img-size', nargs='+', type=int, default=[320, 320], help='[train, test] image sizes')
+    parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--batch-size', type=int, default=45, help='total batch size for all GPUs')
+    parser.add_argument('--img-size', nargs='+', type=int, default=[240, 240], help='[train, test] image sizes')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
@@ -395,9 +414,9 @@ if __name__ == '__main__':
     parser.add_argument('--workers', type=int, default=4, help='maximum number of dataloader workers')
     parser.add_argument('--project', default='runs/train', help='save to project/name')
     parser.add_argument('--name', default='exp', help='save to project/name')
+    parser.add_argument('--format', default='NHWC', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     opt = parser.parse_args()
-    opt.batch_size = 8
     # Set DDP variables
     opt.total_batch_size = opt.batch_size
     opt.world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
@@ -418,7 +437,7 @@ if __name__ == '__main__':
         # opt.hyp = opt.hyp or ('hyp.finetune.yaml' if opt.weights else 'hyp.scratch.yaml')
         opt.data, opt.cfg, opt.hyp = check_file(opt.data), check_file(opt.cfg), check_file(opt.hyp)  # check files
         assert len(opt.cfg) or len(opt.weights), 'either --cfg or --weights must be specified'
-        opt.img_size.extend([opt.img_size[-1]] * (2 - len(opt.img_size)))  # extend to 2 sizes (train, test)
+        opt.img_size.extend([opt.img_size[-2]] * (2 - len(opt.img_size)))  # extend to 2 sizes (train, test)
         opt.name = 'evolve' if opt.evolve else opt.name
         opt.save_dir = increment_path(Path(opt.project) / opt.name, exist_ok=opt.exist_ok | opt.evolve)  # increment run
 

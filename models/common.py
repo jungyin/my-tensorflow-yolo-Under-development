@@ -1,4 +1,4 @@
-from signal import raise_signal
+
 from turtle import forward
 from typing import Optional, Tuple, Union
 from numpy.lib.function_base import place
@@ -15,7 +15,10 @@ from torch import channel_shuffle, conv2d, float32
 from tensorflow.python.keras import initializers
 from tensorflow.python.ops import gen_math_ops
 
-conv2d_data_format='channels_first'
+conv2d_data_format='channels_last'
+
+channels_index = (1 if conv2d_data_format == 'channels_first' else 3)
+
 
 initializer = tf.random_normal_initializer(stddev=0.01)
 def autopadding(k,p=None): # kernel ,padding
@@ -91,9 +94,6 @@ class Conv(layers.Layer):
         
         # 这里我也不太懂当时为啥用or，直接==None不行吗?
         # if(self.act==None or self.act == None):
-        
-        
-        
         if(self.act == None):
             outputs = bn(self.conv(inputs))
         else :
@@ -122,10 +122,10 @@ class StemBlock(layers.Layer):
         
     def call(self,x):
         stem_1_out  = self.stem_1(x)
-        stem_2a_out = self.stem_2a(stem_1_out)
-        stem_2b_out = self.stem_2b(stem_2a_out)
+        # stem_2a_out = self.stem_2a(stem_1_out)
+        stem_2b_out = self.stem_2b(self.stem_2a(stem_1_out))
         stem_2p_out = self.stem_2p(stem_1_out)
-        out = self.stem_3(tf.concat((stem_2b_out,stem_2p_out),1))
+        out = self.stem_3(tf.concat((stem_2b_out,stem_2p_out),channels_index))
       
         return out
 
@@ -173,7 +173,7 @@ class BottleneckCSP(layers.Layer):
         for mm in self.m:
             cv1 = mm(cv1)
         
-        return self.cv4(self.act(self.bn(tf.concat([self.cv3(cv1),self.cv2(x)],axis=1))))
+        return self.cv4(self.act(self.bn(tf.concat([self.cv3(cv1),self.cv2(x)],axis=channels_index))))
     
 class C3(layers.Layer):
     # CSP Bottleneck with 3 convolutions
@@ -196,7 +196,7 @@ class C3(layers.Layer):
         for mm in self.m:
             cv1 = mm(cv1)
         
-        return self.cv3(tf.concat([cv1, self.cv2(x)], axis=1))
+        return self.cv3(tf.concat([cv1, self.cv2(x)], axis=channels_index))
 
 
 class SPPF(layers.Layer):
@@ -262,9 +262,9 @@ class ShuffleV2Block(layers.Layer):
     def call(self, inputs):
         if(self.stride == 1):
             x1,x2 = input.chunk(2,dim=1)
-            out = tf.concat((x1,self.branch1(x2)),axis=1)
+            out = tf.concat((x1,self.branch1(x2)),axis=channels_index)
         else:
-            out = tf.concat((self.branch1(inputs),self.branch2(inputs)),axis=1)
+            out = tf.concat((self.branch1(inputs),self.branch2(inputs)),axis=channels_index)
         out = channel_shuffle(out,2)
         return out
     
@@ -321,7 +321,7 @@ class SPP(layers.Layer):
     
     def call(self, x):
         x = self.ci(x)
-        c=self.co(tf.concat([x] + [m(x) for m in self.m], 1))
+        c=self.co(tf.concat([x] + [m(x) for m in self.m], channels_index))
         return c
 
 class Focus(layers.Layer):
@@ -380,16 +380,15 @@ class Detect(layers.Layer):
         
         self.grid = [tf.zeros(1)] * self.nl #init grid
         
-        self.anchors = tf.convert_to_tensor(np.reshape(anchors,(self.nl,-1,2)),dtype=tf.float32)
+        self.anchors = tf.convert_to_tensor(np.reshape(anchors,(self.nl,-1,2) ),dtype=tf.float32)
         self.anchors_grid = tf.convert_to_tensor(np.reshape(self.anchors,(self.nl,1,-1,1,1,2)),dtype=tf.float32)
-        self.m = [layers.Conv2D(self.no * self.na,1,data_format=conv2d_data_format) for x in ch] 
+        # self.m = [layers.Conv2D(self.no * self.na,1,data_format=conv2d_data_format) for x in ch] 
        
     def build(self,input_shape):
         super(Detect, self).build(input_shape)    
 
     def call(self,x):
         z = []
-        
         if self.export_cat:
             for i in range(self.nl):
                 # ?奇怪，这个是在干嘛？
@@ -397,7 +396,7 @@ class Detect(layers.Layer):
                 
                 bs,_,ny,nx = x[i].shape # x(bs,255,20,20) to x(bs,3,20,20,85)
                 
-                x[i] = tf.transpose(x[i].view(bs,self.na,self.no,ny,nx),perm=[0,1,3,4,2])
+                x[i] = tf.transpose(tf.reshape(x[i],[bs,self.na,self.no,ny,nx]),perm=[0,1,3,4,2])
                 
                 if(self.grid[i].shape[2:4] != x[i].shape[2:4]):
                     self.grid[i],self.anchors_grid[i] = self._make_grid_new(nx,ny,i)
@@ -421,16 +420,18 @@ class Detect(layers.Layer):
                 z.append(tf.reshape(y,bs,-1,self.no))
         
             return tf.concat(z,1)
-       
         for i in range(self.nl):
             conv = layers.Conv2D(self.no * self.na,1,data_format=conv2d_data_format,use_bias=True,bias_initializer='zeros')
             x[i] = conv(x[i])
             
-            bs, _ , ny , nx = x[i].shape
+            bs, ny , nx , _ = x[i].shape
             # 将x[i]重新编辑成 anchor输，输出条目类型和宽高
-            # 用transposse将模型日刀输出由bs,先验框数量，nc数量，宽高，变成bs,先验框数量，宽高，nc数量
+            # 用transposse将模型输出由bs,先验框数量，nc数量，宽高，变成bs,先验框数量，宽高，nc数量
+            # if(channels_index==1):
+                # 说真的，这里的transpose 有点意义不明,总感觉thranspose和resize有一腿、
+            
             x[i] =  tf.transpose(tf.reshape(x[i],(bs,self.na, self.no, ny, nx)),perm=[0,1,3,4,2])
-
+           
 
             # tensorflow没有明确的训练和校对方法，但torch有，所以这里不用管先
             # 如果不是已经进入训练中，那就要先吧传入的值归零一下
@@ -480,4 +481,3 @@ class Detect(layers.Layer):
         
         
 
-   

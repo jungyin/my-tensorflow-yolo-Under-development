@@ -105,7 +105,7 @@ def plot_labels(labels, save_dir=Path(''), loggers=None):
             v.log({"Labels": [v.Image(str(x), caption=x.name) for x in save_dir.glob('*labels*.jpg')]})
             
 
-def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max_size=640, max_subplots=16):
+def plot_images(images, targets, paths=None, fname='images.jpg' ,format = 'NCHW', names=None, max_size=640, max_subplots=16):
     # Plot image grid with labels
 
     
@@ -116,7 +116,11 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
 
     tl = 3  # line thickness
     ft = max(tl - 1, 1)  # font thickness
-    bs, _, h, w = images.shape  # batch size, _, height, width
+    
+    if(format=='NHWC'):
+        bs, h, w ,_= images.shape  # batch size, height, width, channel
+    else:
+        bs, _, h, w = images.shape  # batch size, channel, height, width
     bs = min(bs, max_subplots)  # limit plot images
     ns = np.ceil(bs ** 0.5)  # number of subplots (square)
 
@@ -134,8 +138,8 @@ def plot_images(images, targets, paths=None, fname='images.jpg', names=None, max
 
         block_x = int(w * (i // ns))
         block_y = int(h * (i % ns))
-
-        img = img.transpose(1, 2, 0)
+        if(format=='NCHW'):
+            img = img.transpose(1, 2, 0)
         if scale_factor < 1:
             img = cv2.resize(img, (w, h))
 
