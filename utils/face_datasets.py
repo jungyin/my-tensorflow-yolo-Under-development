@@ -275,8 +275,7 @@ class LoadFaceImagesAndLabels(Sequence):
                             translate=self.hyp['translate'],
                             scale=self.hyp['scale'],
                             shear=self.hyp['shear'],
-                            perspective=self.hyp['perspective'],
-                            border=self.mosaic_border)  # border to remove
+                            perspective=self.hyp['perspective'])  # border to remove
             
             augment_hsv(img,hyp['hsv_h'],hyp['hsv_s'],hyp['hsv_v'])
             
@@ -340,7 +339,7 @@ class LoadFaceImagesAndLabels(Sequence):
         return img, labels_out , self.img_files[index]
     
     def collate_fn(self,imgs,labels,paths):
-
+        ll = labels[0]
         for i, l in enumerate(labels):
             l[:, 0] = i  # add target image index for build_targets()
             
@@ -457,10 +456,10 @@ def load_mosaic_face(self,index):
     #这个地方是-x完全是因为最开始给的就是负数，别想太多了，浪费时间太多了在这里
     myc,mxc = [int(uniform(-x, 2 * s + x)) for x in self.mosaic_border] #随机取马赛克的输量
     
-    
+    myc,mxc = [174, 292]
     
     indices = [index] + [ randint(0, self.n - 1 )  for _ in range(3)]  #3个随机的图像附加索引
-    # indices = [1268,952,1943]
+    indices = [36,1744,913,2656]
     # 我tm一个飞刀，找了半天是这里吧index给改了
     
     for i, index in enumerate(indices):

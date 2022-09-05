@@ -16,6 +16,7 @@ from tensorflow.python.keras import initializers
 from tensorflow.python.ops import gen_math_ops
 
 conv2d_data_format='channels_last'
+# conv2d_data_format='channels_first'
 
 channels_index = (1 if conv2d_data_format == 'channels_first' else 3)
 
@@ -394,8 +395,13 @@ class Detect(layers.Layer):
                 # ?奇怪，这个是在干嘛？
                 x[i] = self.m[i](x[i]) #conv
                 
-                bs,_,ny,nx = x[i].shape # x(bs,255,20,20) to x(bs,3,20,20,85)
+                if channels_index == 3: 
+                    bs,ny,nx,_ = x[i].shape # x(bs,255,20,20) to x(bs,3,20,20,85)
+                else:
+                    bs,_,ny,nx = x[i].shape # x(bs,255,20,20) to x(bs,3,20,20,85)
+                    
                 
+                    
                 x[i] = tf.transpose(tf.reshape(x[i],[bs,self.na,self.no,ny,nx]),perm=[0,1,3,4,2])
                 
                 if(self.grid[i].shape[2:4] != x[i].shape[2:4]):
@@ -424,7 +430,12 @@ class Detect(layers.Layer):
             conv = layers.Conv2D(self.no * self.na,1,data_format=conv2d_data_format,use_bias=True,bias_initializer='zeros')
             x[i] = conv(x[i])
             
-            bs, ny , nx , _ = x[i].shape
+            if channels_index == 3: 
+                bs,ny,nx,_ = x[i].shape # x(bs,255,20,20) to x(bs,3,20,20,85)
+            else:
+                bs,_,ny,nx = x[i].shape # x(bs,255,20,20) to x(bs,3,20,20,85)
+                
+            
             # 将x[i]重新编辑成 anchor输，输出条目类型和宽高
             # 用transposse将模型输出由bs,先验框数量，nc数量，宽高，变成bs,先验框数量，宽高，nc数量
             # if(channels_index==1):

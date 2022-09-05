@@ -41,7 +41,7 @@ class Model(keras.models.Model):
         if(nc and nc!= yaml['nc']):
             logger.info('Overriding model.yaml nc=%g with nc=%g' % (yaml['nc'],nc))
         
-        self.model , self.savelist = parse_model(yaml,ch=[ch])
+        self.model , self.savelist = parse_model(yaml,ch=[ch],format=format)
         
         self.names = [str(i) for i in range(yaml['nc'])] 
         
@@ -135,9 +135,9 @@ class Model(keras.models.Model):
           
             
            
+            
+            
             x = m(x)
-          
-        
             
             # 1,64,32,32
             # 1,128,16,16
@@ -186,7 +186,7 @@ class Model(keras.models.Model):
         
                 
         
-def parse_model(d, ch):  # model_dict, input_channels(3)
+def parse_model(d, ch,format):  # model_dict, input_channels(3)
     # 被跳过的str，读取yaml中有一些属性是string字符串格式，这些字符串需要被跳过
     jumpStr=['nearest','channels_first','channels_last']
     
@@ -196,6 +196,12 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
     no = na * (nc+5)
     
     itemlayers,save,c2=[],[],ch[-1]
+    
+    if (format == 'NCHW'):
+        format = 'channels_first'
+    elif (format == 'NHWC'):
+        format = 'channels_last'   
+    
     for i, (f,n,m,args) in enumerate(d['backbone'] + d['head']):
         if isinstance(m,str):
            
@@ -205,8 +211,12 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
             m=m
         
         for j,a in enumerate (args):
-            
+            if(a == 'channels_first' or a == 'channels_last'):
+                a = format
             args[j] = eval(a) if isinstance(a,str) and a not in jumpStr else a
+            
+        
+        
         print('打印参数',end=' ')
         print(m,end=' ')
         print(args,end=' ')
@@ -229,11 +239,10 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
                 n = 1
         elif m is Concat:
             c2 = sum([ch[-1 if x == -1 else x + 1] for x in f])
+            args= [3] if format=='NHWC' else [1]
         elif m is BatchNormalization:
             args = [ch[f[0] if isinstance(f,list) else f]]
 
-        elif m is Concat:
-            c2 = sum ([ch[-1 if x == -1 else x +1] for x in f])
         elif m is Detect:
             args.append([ch[x+1] for x in f])
             if isinstance(args[1],int):
@@ -248,6 +257,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         for _ in range(n):
             
             m_=m(*args)
+            
             m_.i,m_.f=i,f
             itemlayers.append(m_)
             

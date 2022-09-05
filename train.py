@@ -386,7 +386,7 @@ if __name__ == '__main__':
     parser.add_argument('--data', type=str, default='data/widerface.yaml', help='data.yaml path')
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.yaml', help='hyperparameters path')
     parser.add_argument('--epochs', type=int, default=1)
-    parser.add_argument('--batch-size', type=int, default=45, help='total batch size for all GPUs')
+    parser.add_argument('--batch-size', type=int, default=40, help='total batch size for all GPUs')
     parser.add_argument('--img-size', nargs='+', type=int, default=[240, 240], help='[train, test] image sizes')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
@@ -417,6 +417,8 @@ if __name__ == '__main__':
     parser.add_argument('--format', default='NHWC', help='save to project/name')
     parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
     opt = parser.parse_args()
+    
+    
     # Set DDP variables
     opt.total_batch_size = opt.batch_size
     opt.world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
