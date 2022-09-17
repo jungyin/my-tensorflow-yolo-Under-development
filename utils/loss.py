@@ -26,7 +26,7 @@ def build_targets(preds, targets, model):
     
     tshape = [1]+targets.shape
     
-    targets = tf.concat(( np.repeat(np.reshape(targets,tshape),na,axis=0), ai[:,:,None]), 2) # append anchor indices 为anchors附加索引，方便使用时快速获取
+    targets = tf.concat(( np.repeat(np.reshape(targets,tshape),na,axis=0), ai[:,:,None]), 2) # append anchor indices 
 
     g = 0.5 #bias
     off = np.array([[0, 0],[1, 0], [0, 1], [-1, 0], [0, -1]],dtype=np.float32) * g 
@@ -41,10 +41,10 @@ def build_targets(preds, targets, model):
         
         if nt : # 在有标签时才会走这里
             # Matches
-            r = t[:, :, 4:6] / np.reshape(anchors,[anchors.shape[0],1,anchors.shape[-1]]) #wh ratio 获取这个区域的概率是多少
-       
-            j = np.max(tf.maximum(r, 1. / r),2) < model.hyp['anchor_t'] #用于判断这个targets是不是一个合格的targets
+            r = t[:, :, 4:6] / anchors[:,None] #wh ratio 获取这个区域的概率是多少
             
+            j = np.max(tf.maximum(r, 1. / r),2) < model.hyp['anchor_t'] #用于判断这个targets是不是一个合格的targets
+          
             
             
             t = t[j] #filter 这里的j应该还是一个单独的boolean值，不是一个boolean数组，那这里应该取的下表位不是0，就是1咯
@@ -180,14 +180,15 @@ def compute_loss(preds, targets, model):
           
             
             lmark += landmarks_loss(plandmarks, tlandmarks[i], lmks_mask[i])
-        bce =BCEobj(pred[..., 4],t_obj,objWeights)
+     
         loss_obj += BCEobj(pred[..., 4],t_obj,objWeights) * balance[i]
         
     s = 3 / no
+    
     lbox *= h['box'] * s
     loss_obj *= h['obj'] * s * (1.4 if no == 4 else 1.)
-    lcls = h['cls'] * s
-    lmark = h['landmark'] * s
+    lcls *= h['cls'] * s
+    lmark *= h['landmark'] * s
     
     bs = t_obj.shape[0] #batch size
     

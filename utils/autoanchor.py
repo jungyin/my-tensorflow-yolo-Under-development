@@ -13,8 +13,8 @@ def check_anchor_order(m):
     ds = m.stride[-1] - m.stride[0]
     if np.sign(da) != np.sign(ds):
         print('Reversing anchor order')
-        m.anchors[:] = np.flip(m.anchors,0)
-        m.anchor_grid[:] = np.flip(m.anchor_grid,0) 
+        m.anchors[:] = tf.experimental.numpy.flip(m.anchors,0)
+        m.anchor_grid[:] = tf.experimental.numpy.flip(m.anchor_grid,0) 
 
 def check_anchors(dataset, model, thr=4.0, imgsz=640):
     prefix = colorstr('autoanchor: ')

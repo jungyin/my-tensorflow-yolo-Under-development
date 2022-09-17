@@ -26,9 +26,10 @@ from utils.autoanchor import check_anchor_order
 logger = logging.getLogger(__name__)
 
 class Model(keras.models.Model):
-    def __init__(self,cfg='/models/yolov5s.yaml',ch=3,nc=None,format='NCHW'):
+    def __init__(self,cfg='/models/yolov5s.yaml',batch_size=40,img_size=[320,320],ch=3,nc=None,format='NCHW'):
         super(Model,self).__init__()
         self.format=format
+        print('初始化')
         if isinstance(cfg,dict):
             yaml = cfg
         else :
@@ -45,22 +46,21 @@ class Model(keras.models.Model):
         
         self.names = [str(i) for i in range(yaml['nc'])] 
         
-        # m = self.model[-1] #获取detect()层
+        m = self.model[-1] #获取detect()层
         # tensorflow会走 forward_once ，不要画蛇添足
-        # if isinstance(m,Detect):
-        #     s = 128
+        if isinstance(m,Detect):
+            s = 128
 
-        #     # format有 number ,channel, height,width以及 number , height,width,channel,俩种格式
+            # format有 number ,channel, height,width以及 number , height,width,channel,俩种格式
              
-        #     call = self.call(tf.zeros([1,ch,s,s]) if (format == 'NCHW') else tf.zeros([1,s,s,ch]))
+            call = self.call(tf.zeros([1,ch,s,s]) if (format == 'NCHW') else tf.zeros([1,s,s,ch]))
         
             
-        #     stridearray = [s / x.shape[-2] for x in call]
-        #     m.stride=tf.convert_to_tensor(stridearray)
+            m.stride=tf.convert_to_tensor( [s / x.shape[-2] for x in call])
             
-        #     m.anchors /= tf.reshape(m.stride,[-1,1,1] )
-        #     check_anchor_order(m)
-        #     self.stride = m.stride 
+            m.anchors /= tf.reshape(m.stride,[-1,1,1] )
+            check_anchor_order(m)
+            self.stride = m.stride 
             #tensorflow似乎不需要我来配置weights
             # self._initialize_biases()
         
@@ -68,8 +68,12 @@ class Model(keras.models.Model):
         initiaLize_weights(self.model)
         self.info()
         logger.info('')
-
-
+        if(format=='NCHW'):
+            self._set_inputs(tf.TensorSpec([batch_size,3,img_size[0],img_size[1]]))
+        else:
+            self._set_inputs(tf.TensorSpec([batch_size,img_size[0],img_size[1],3]))
+    
+    # @tf.function #(input_signature=[tf.TensorSpec(shape=[] ,dtyoe= tf.float32)])
     def call(self, x, augment=False, profile=False):
         if augment:
             img_size = x.shape[-2:]
@@ -97,6 +101,7 @@ class Model(keras.models.Model):
         
     # 首次初始化，这里改一下方法，改走build，不走call，不然会吧build给走了然后就寄了
     def forward_once(self,x,profile=False):
+        
         y, dt=[],[]
         # 这个i用来判断当前的m是否需要被保存下来
         
@@ -134,7 +139,25 @@ class Model(keras.models.Model):
             
           
             
-           
+            # else :
+                # if(isinstance(list,x)):
+                    # print(x)
+                # else:
+                # print(x.shape)
+            # if(isinstance(x,list)):
+            #     cc = tf.convert_to_tensor(x)
+            #     print(cc)
+            
+            # cc = m(x)
+            if(isinstance(m,Detect)):
+                return m(x)
+                # break
+            #     # if(x[0].shape[0] == None):
+                    
+            #     x = (m(x[0],x[0],x[0]))
+            #     # else:
+            #         # x = (m([x[0],x[1],x[2]]))
+            # else:
             
             
             x = m(x)
@@ -142,7 +165,9 @@ class Model(keras.models.Model):
             # 1,64,32,32
             # 1,128,16,16
             y.append(x if m.i in self.savelist else None)
-            
+        
+        # x=[m(x,0),m(x,1),m(x,2)]
+        
         return x
     def _initialize_biases(self,cf=None):
         # 初始化 detect中的biases ,cf是类出现的频率(class frequency)
@@ -150,7 +175,7 @@ class Model(keras.models.Model):
         for mi, s in zip(m.m.layers,m.stride):
             mi.get_weights()
             mi.bias = True
-            print(mi.get_weights())
+            # print(mi.get_weights())
             b = np.reshape(mi.bias,(m.na,-1))
            
             n = float(s.numpy())
@@ -239,7 +264,7 @@ def parse_model(d, ch,format):  # model_dict, input_channels(3)
                 n = 1
         elif m is Concat:
             c2 = sum([ch[-1 if x == -1 else x + 1] for x in f])
-            args= [3] if format=='NHWC' else [1]
+            args= [3] if format=='channels_last' else [1]
         elif m is BatchNormalization:
             args = [ch[f[0] if isinstance(f,list) else f]]
 
@@ -255,6 +280,7 @@ def parse_model(d, ch,format):  # model_dict, input_channels(3)
         print(args)
         
         for _ in range(n):
+            
             
             m_=m(*args)
             

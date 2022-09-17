@@ -67,7 +67,7 @@ class Conv(layers.Layer):
         self.act = layers.Activation(nn.silu) if act is True else (act if isinstance(act,layers.Activation) else None)
         
         self.kernel_initializers=initializers.get("glorot_normal")
-        
+        self.bn = layers.BatchNormalization(momentum=0.03)
         
         
     def build(self,input_shape):
@@ -91,15 +91,15 @@ class Conv(layers.Layer):
     def call(self,inputs):
         # 一个conv，需要将输入的参数进行bn，conv，如果有需要的话，还要走一次silu操作
         
-        bn = layers.BatchNormalization(momentum=0.03)
+        
         
         # 这里我也不太懂当时为啥用or，直接==None不行吗?
         # if(self.act==None or self.act == None):
         if(self.act == None):
-            outputs = bn(self.conv(inputs))
+            outputs = self.bn(self.conv(inputs))
         else :
-            outputs = self.act(bn(self.conv(inputs))) 
-            
+            outputs = self.act(self.bn(self.conv(inputs))) 
+          
         # outputs = gen_math_ops.MatMul(a=inputs, b=self.kernel)# 矩阵相乘
     
         return outputs
@@ -383,15 +383,20 @@ class Detect(layers.Layer):
         
         self.anchors = tf.convert_to_tensor(np.reshape(anchors,(self.nl,-1,2) ),dtype=tf.float32)
         self.anchors_grid = tf.convert_to_tensor(np.reshape(self.anchors,(self.nl,1,-1,1,1,2)),dtype=tf.float32)
-        # self.m = [layers.Conv2D(self.no * self.na,1,data_format=conv2d_data_format) for x in ch] 
-       
+        self.m = [layers.Conv2D(self.no * self.na,1,data_format=conv2d_data_format,use_bias=True,bias_initializer='zeros') for x in ch] 
+        # self.conv = layers.Conv2D(self.no * self.na,1,data_format=conv2d_data_format,use_bias=True,bias_initializer='zeros')
     def build(self,input_shape):
         super(Detect, self).build(input_shape)    
 
+    # def call(self,x1,x2,x3):
     def call(self,x):
+        x=x.copy()
+        # x=[x1,x2,x3]
         z = []
+        # print(x)
         if self.export_cat:
             for i in range(self.nl):
+            # if(True):
                 # ?奇怪，这个是在干嘛？
                 x[i] = self.m[i](x[i]) #conv
                 
@@ -427,8 +432,8 @@ class Detect(layers.Layer):
         
             return tf.concat(z,1)
         for i in range(self.nl):
-            conv = layers.Conv2D(self.no * self.na,1,data_format=conv2d_data_format,use_bias=True,bias_initializer='zeros')
-            x[i] = conv(x[i])
+        # if(True):
+            x[i] = self.m[i](x[i])
             
             if channels_index == 3: 
                 bs,ny,nx,_ = x[i].shape # x(bs,255,20,20) to x(bs,3,20,20,85)
@@ -439,9 +444,9 @@ class Detect(layers.Layer):
             # 将x[i]重新编辑成 anchor输，输出条目类型和宽高
             # 用transposse将模型输出由bs,先验框数量，nc数量，宽高，变成bs,先验框数量，宽高，nc数量
             # if(channels_index==1):
-                # 说真的，这里的transpose 有点意义不明,总感觉thranspose和resize有一腿、
-            
-            x[i] =  tf.transpose(tf.reshape(x[i],(bs,self.na, self.no, ny, nx)),perm=[0,1,3,4,2])
+            # print(x[i])
+            x[i] = tf.reshape(x[i],(-1,self.na, self.no, ny, nx))
+            x[i] =  tf.transpose(x[i],perm=[0,1,3,4,2])
            
 
             # tensorflow没有明确的训练和校对方法，但torch有，所以这里不用管先

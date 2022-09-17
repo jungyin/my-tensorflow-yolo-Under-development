@@ -459,7 +459,7 @@ def load_mosaic_face(self,index):
     myc,mxc = [174, 292]
     
     indices = [index] + [ randint(0, self.n - 1 )  for _ in range(3)]  #3个随机的图像附加索引
-    indices = [36,1744,913,2656]
+    # indices = [36,1744,913,2656]
     # 我tm一个飞刀，找了半天是这里吧index给改了
     
     for i, index in enumerate(indices):

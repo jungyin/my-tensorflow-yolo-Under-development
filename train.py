@@ -34,11 +34,12 @@ from utils.google_utils import attempt_download
 from utils.metrics import fitness
 from utils.tensorflow_utils import ModelEMA
 
+from tensorflow.keras.applications.mobilenet_v2 import MobileNetV2 as mvn2
 import gc
 
 
 import os
-os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 print('gpu可用',end='')
 print(tf.test.is_gpu_available)
@@ -118,7 +119,7 @@ def train(hyp,opt,wandb=None):
         # model.load_state_dict(state_dict,strict=False)
         
     else:
-        model = Model(opt.cfg,ch=3,nc=nc,format=opt.format)
+        model = Model(opt.cfg,ch=3,batch_size=opt.batch_size,img_size=opt.img_size,nc=nc,format=opt.format)
     
   
     
@@ -168,7 +169,8 @@ def train(hyp,opt,wandb=None):
     gs = 32
     imgsz, imgsz_test = [check_img_size(x,gs) for x in opt.img_size]
     
-    
+
+ 
     model.build([1,128,128,3])
     
     
@@ -239,6 +241,8 @@ def train(hyp,opt,wandb=None):
     logger.info('Image sizes %g train, %g test\n'
             'Logging results to %s\n'
             'Starting training for %g epochs...' % (imgsz, imgsz_test,  save_dir, epochs))
+   
+    # model.save("./mask_detector")
    
     for epoch in range(start_epoch,epochs):
         # 更新图片权重
@@ -322,15 +326,17 @@ def train(hyp,opt,wandb=None):
                 
                 
                 loss, loss_items = compute_loss(pred,targets,model)
+               
+                print(loss_items,end='')
+                print(loss)
+                if rank != -1 :
+                # gradient averaged between devices in DDP mode
+                # ddp模式下需要配置设备间的梯度平均值
+                    loss *= opt.world_size 
                 
-            if rank != -1 :
-            # gradient averaged between devices in DDP mode
-            # ddp模式下需要配置设备间的梯度平均值
-                loss *= opt.world_size 
-            
-            grads = gt.gradient(loss,model.variables)
-            optimizer.apply_gradients(zip(grads,model.variables)) # 优化函数应用梯度进行优化
-            # optimizer.apply_gradients(zip(grads,model.trainable_variables)) # 不要使用trainable_variables
+                grads = gt.gradient(loss,model.trainable_variables)
+                optimizer.apply_gradients((grad, var) for (grad, var) in zip(grads,model.trainable_variables) if grad is not None) # 优化函数应用梯度进行优化
+                # optimizer.apply_gradients(zip(grads,model.trainable_variables)) # 不要使用trainable_variables
 
             
             #?什么玩意
@@ -373,7 +379,7 @@ def train(hyp,opt,wandb=None):
             # # 跑完一次epoch记得gc叫出来一下，做个深度清理
             gc.collect()
         
-    model.save("mask_detector.h5", save_format="tf")
+    model.save("mask_detector")
 
 
 if __name__ == '__main__':
@@ -385,11 +391,11 @@ if __name__ == '__main__':
     parser.add_argument('--cfg', type=str, default='models/yolov5s.yaml', help='model.yaml path')
     parser.add_argument('--data', type=str, default='data/widerface.yaml', help='data.yaml path')
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.yaml', help='hyperparameters path')
-    parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--epochs', type=int, default=5)
     parser.add_argument('--batch-size', type=int, default=40, help='total batch size for all GPUs')
-    parser.add_argument('--img-size', nargs='+', type=int, default=[240, 240], help='[train, test] image sizes')
+    parser.add_argument('--img-size', nargs='+', type=int, default=[256, 256], help='[train, test] image sizes')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
-    parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
+    parser.add_argument('--resume', nargs='?', const=False, default=False, help='resume most recent training')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
     parser.add_argument('--notest', action='store_true', help='only test final epoch')
     parser.add_argument('--noautoanchor', action='store_true', help='disable autoanchor check')
