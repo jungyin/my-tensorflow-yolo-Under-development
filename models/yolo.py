@@ -25,9 +25,9 @@ from utils.autoanchor import check_anchor_order
 
 logger = logging.getLogger(__name__)
 
-class Model(keras.models.Model):
+class MyModel(keras.models.Model):
     def __init__(self,cfg='/models/yolov5s.yaml',batch_size=40,img_size=[320,320],ch=3,nc=None,format='NCHW'):
-        super(Model,self).__init__()
+        super(MyModel,self).__init__()
         self.format=format
         print('初始化')
         if isinstance(cfg,dict):
@@ -75,7 +75,7 @@ class Model(keras.models.Model):
             self._set_inputs(tf.TensorSpec([batch_size,img_size[0],img_size[1],3]))
     
     def build(self, input_shape):
-        super(Model,self).build(input_shape)
+        super(MyModel,self).build(input_shape)
         
     
     # @tf.function #(input_signature=[tf.TensorSpec(shape=[] ,dtyoe= tf.float32)])
