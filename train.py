@@ -144,6 +144,7 @@ def train(hyp,opt,wandb=None):
         
     
     # 配置学习曲线
+    
     lf = lambda x: ((1 + math.cos(x * math.pi / epochs)) / 2) * (1 - hyp['lrf']) + hyp['lrf'] #cosine
     # scheduler = lr_
     
@@ -189,7 +190,7 @@ def train(hyp,opt,wandb=None):
     
     
     mlc = np.concatenate(dataset.labels,0)[:, 0].max() #确认可能性最大的class
-    # ema=None
+    ema = None
     
     dl = len(dataset) #  data len 当前图片数据的总个数
     nb = dl // batch_size # number of batches 当前数据按照batchs分了后需要轮读几次才能全部读取完，跑完一个epochs
@@ -201,7 +202,7 @@ def train(hyp,opt,wandb=None):
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (mlc, nc, opt.data, nc - 1)
     
     if rank in [-1,0]:
-        # ema = tf.train.ExponentialMovingAverage(decay=0.9999,num_updates=start_epoch * nb // accumulate)
+        ema = tf.train.ExponentialMovingAverage(decay=0.9999,num_updates=start_epoch * nb // accumulate)
         # testdataset = create_dataloader(test_path, imgsz_test, total_batch_size, gs, opt,
         #                                         hyp=hyp, cache=opt.cache_images and not opt.notest, rect=True, rank=-1,
         #                                         world_size=opt.world_size, workers=opt.workers,
@@ -243,7 +244,7 @@ def train(hyp,opt,wandb=None):
             'Starting training for %g epochs...' % (imgsz, imgsz_test,  save_dir, epochs))
    
     # model.save("./mask_detector")
-   
+    
     for epoch in range(start_epoch,epochs):
         # 更新图片权重
         if opt.image_weights:
@@ -327,15 +328,22 @@ def train(hyp,opt,wandb=None):
                 
                 loss, loss_items = compute_loss(pred,targets,model)
                
-                print(loss_items,end='')
-                print(loss)
+              
                 if rank != -1 :
                 # gradient averaged between devices in DDP mode
                 # ddp模式下需要配置设备间的梯度平均值
                     loss *= opt.world_size 
                 
                 grads = gt.gradient(loss,model.trainable_variables)
-                optimizer.apply_gradients((grad, var) for (grad, var) in zip(grads,model.trainable_variables) if grad is not None) # 优化函数应用梯度进行优化
+                
+                grads = tf.distribute.get_replica_context().all_reduce('sum', grads)
+                
+                # grads = [ (grad,var) for (grad, var) in zip(grads,model.trainable_variables) if grad is not None]
+                # vars = [var for grad,var in grads]
+                # optimizer.minimize( lambda: (loss ** 2) / 2.0,grads) # 优化函数应用梯度进行优化
+                optimizer.apply_gradients(zip(grads,model.trainable_variables) ) # 不要使用trainable_variables
+                # ema.apply(grads)
+                
                 # optimizer.apply_gradients(zip(grads,model.trainable_variables)) # 不要使用trainable_variables
 
             
@@ -391,7 +399,7 @@ if __name__ == '__main__':
     parser.add_argument('--cfg', type=str, default='models/yolov5s.yaml', help='model.yaml path')
     parser.add_argument('--data', type=str, default='data/widerface.yaml', help='data.yaml path')
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.yaml', help='hyperparameters path')
-    parser.add_argument('--epochs', type=int, default=5)
+    parser.add_argument('--epochs', type=int, default=1)
     parser.add_argument('--batch-size', type=int, default=40, help='total batch size for all GPUs')
     parser.add_argument('--img-size', nargs='+', type=int, default=[256, 256], help='[train, test] image sizes')
     parser.add_argument('--rect', action='store_true', help='rectangular training')

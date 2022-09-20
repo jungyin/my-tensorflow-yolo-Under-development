@@ -43,9 +43,9 @@ class MyDenseLayer(layers.Layer):
         return tf.matmul(input, self.kernel)
 
 # 最基础的conv
-class Conv(layers.Layer):
+class MyConv(layers.Layer):
     def __init__(self, ci,filters, k=1, s=1, p=1, g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
-        super(Conv, self).__init__()
+        super(MyConv, self).__init__()
         # l2正则
         # 正则
         l2 = L2(4e-5)
@@ -72,7 +72,7 @@ class Conv(layers.Layer):
         
     def build(self,input_shape):
         
-        super(Conv, self).build(input_shape)
+        super(MyConv, self).build(input_shape)
         
         # self.kernel  = self.add_weight(
         #     name='kernel ',
@@ -111,12 +111,12 @@ class Conv(layers.Layer):
 class StemBlock(layers.Layer):
     def __init__(self, c1,filters, k=3, s=2, p='same', g=1, act=True):  # ch_in, ch_out, kernel, stride, padding, groups
         super(StemBlock, self).__init__()
-        self.stem_1=Conv(c1 , filters , k , s , p , g , act)
-        self.stem_2a=Conv(filters , filters//2 , 1 , 1 , 'valid')
-        self.stem_2b=Conv(filters//2 , filters , 3 , 2 , 1)
+        self.stem_1=MyConv(c1 , filters , k , s , p , g , act)
+        self.stem_2a=MyConv(filters , filters//2 , 1 , 1 , 'valid')
+        self.stem_2b=MyConv(filters//2 , filters , 3 , 2 , 1)
         # 注意！torch版本这里是有一个取整方向，我这里没找到tensorflow对应的！
         self.stem_2p=layers.MaxPool2D((2,2),2,data_format=conv2d_data_format)
-        self.stem_3=Conv(filters*2,filters,1 , 1,'valid')
+        self.stem_3=MyConv(filters*2,filters,1 , 1,'valid')
         
     def build(self,input_shape):
         super(StemBlock, self).build(input_shape)
@@ -138,8 +138,8 @@ class Bottleneck(layers.Layer):
         c_ = int(co * e) #hidden channels
         
        
-        self.cv1= Conv(ci,c_,1,1)
-        self.cv2= Conv(c_,co,3,1,g=g)
+        self.cv1= MyConv(ci,c_,1,1)
+        self.cv2= MyConv(c_,co,3,1,g=g)
         self.add = shortcut and ci == co
         
     def build(self,input_shape):
@@ -157,10 +157,10 @@ class BottleneckCSP(layers.Layer):
     def __init__(self,ci,co,n=1,shortcut=True,g=1,e=0.5) :  # ch_in, ch_out, shortcut, groups, expansion
         super(BottleneckCSP,self).__init__()
         c_ = int(co * e) # 隐藏层的深度
-        self.cv1 = Conv(c_,1,1)
+        self.cv1 = MyConv(c_,1,1)
         self.cv2 = layers.Conv2D(c_,(1,1),(1,1),use_bias=False,data_format=conv2d_data_format)
         self.cv3 = layers.Conv2D(c_,(1,1),(1,1),use_bias=False,data_format=conv2d_data_format)
-        self.cv4 = Conv(co,1,1,use_bias=False)
+        self.cv4 = MyConv(co,1,1,use_bias=False)
         self.bn = layers.BatchNormalization()
         self.act = layers.Activation(nn.leaky_relu(0.1))
         self.m = [Bottleneck(c_,c_,shortcut,g,e=1.0) for _ in range(n)]
@@ -181,9 +181,9 @@ class C3(layers.Layer):
     def __init__(self,input,filters,n=1,shortcut = True ,g=1,e=0.5) : # ch_in, ch_out,number, shortcut, groups, expansion
         super(C3,self).__init__()
         c_ = int(filters * e)
-        self .cv1 = Conv(input,c_,1,1)
-        self .cv2 = Conv(input,c_,1,1)
-        self .cv3 = Conv( 2 * c_, filters ,1)
+        self .cv1 = MyConv(input,c_,1,1)
+        self .cv2 = MyConv(input,c_,1,1)
+        self .cv3 = MyConv( 2 * c_, filters ,1)
         self .m = [Bottleneck(c_,c_,shortcut,g,e=1.0) for _ in range(n)]
         
     
@@ -204,8 +204,8 @@ class SPPF(layers.Layer):
     def __init__(self,ci,co,k=5):
         super(SPPF, self).__init__()
         c_ = ci //2 # hidden channels
-        self.cv1 = Conv( ci,c_,1,1)
-        self.cv2 = Conv(c_ * 4 ,co ,1,1)
+        self.cv1 = MyConv( ci,c_,1,1)
+        self.cv2 = MyConv(c_ * 4 ,co ,1,1)
         self.m = layers.MaxPool2D((k,k),1,data_format=conv2d_data_format)
     
     def build(self,input_shape):
@@ -312,8 +312,8 @@ class SPP(layers.Layer):
         self.k = k
         
         self.filters=filters
-        self.ci = Conv(ci,c_, 1, 1)
-        self.co = Conv(c_ * (len(k) + 1),filters, 1, 1)
+        self.ci = MyConv(ci,c_, 1, 1)
+        self.co = MyConv(c_ * (len(k) + 1),filters, 1, 1)
         self.m= [layers.MaxPool2D(pool_size=(m,m),strides=(1,1),padding='same',data_format=conv2d_data_format) for m in k]
     
     def build(self,input_shape):

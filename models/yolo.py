@@ -11,7 +11,7 @@ from tensorflow.python.framework.tensor_shape import TensorShape
 
 import numpy as np
 import math
-from models.common import BottleneckCSP, Conv,StemBlock,C3,SPP,SPPF,Concat,Detect
+from models.common import BottleneckCSP, MyConv,StemBlock,C3,SPP,SPPF,Concat,Detect
 from utils.general import make_divisible
 from utils.tensorflow_utils import scale_img,stats_graph,fuse_conv_and_bn,model_info,initiaLize_weights
 from tensorflow.keras.layers import BatchNormalization,UpSampling2D
@@ -39,6 +39,7 @@ class Model(keras.models.Model):
                 yaml = y.load(f,Loader=y.FullLoader)
         
         ch = yaml['ch'] = yaml.get('ch',ch)
+        self.ch=ch
         if(nc and nc!= yaml['nc']):
             logger.info('Overriding model.yaml nc=%g with nc=%g' % (yaml['nc'],nc))
         
@@ -73,8 +74,13 @@ class Model(keras.models.Model):
         else:
             self._set_inputs(tf.TensorSpec([batch_size,img_size[0],img_size[1],3]))
     
+    def build(self, input_shape):
+        super(Model,self).build(input_shape)
+        
+    
     # @tf.function #(input_signature=[tf.TensorSpec(shape=[] ,dtyoe= tf.float32)])
-    def call(self, x, augment=False, profile=False):
+    def call(self, x ,augment=False, profile=False,training=True,demo=456):
+        
         if augment:
             img_size = x.shape[-2:]
             s = [1,0.83,0.67]
@@ -195,7 +201,7 @@ class Model(keras.models.Model):
     def fuse(self):
         print('Fusing layers...')
         for m in self.model.modules():
-            if type(m) in Conv and hasattr(m,'bn'):
+            if type(m) in MyConv and hasattr(m,'bn'):
                 m.conv = fuse_conv_and_bn(m.conv,m.bn)
                 delattr(m,'bn') #由于上面已经把bn融合进去了，这里就需要删除bn
                 m.call = m.fuseCall
@@ -242,14 +248,14 @@ def parse_model(d, ch,format):  # model_dict, input_channels(3)
             
         
         
-        print('打印参数',end=' ')
-        print(m,end=' ')
-        print(args,end=' ')
+        # print('打印参数',end=' ')
+        # print(m,end=' ')
+        # print(args,end=' ')
         # 重新计算模型深度
         n = max(round(n*gd),1) if n>1 else n 
-        print('模型深度',end='')
-        print(n,end='')
-        if m in [Conv,StemBlock,C3,SPP,SPPF]:
+        # print('模型深度',end='')
+        # print(n,end='')
+        if m in [MyConv,StemBlock,C3,SPP,SPPF]:
             
             c1,c2 = ch[f[0] if isinstance(f,list) else f],args[0]
             
@@ -314,5 +320,13 @@ def parse_model(d, ch,format):  # model_dict, input_channels(3)
     # model.variables
     return model,sorted(save)
 
-        
+class MyLRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
+    
+  def __init__(self, initial_learning_rate,lr):
+    self.initial_learning_rate = initial_learning_rate
+    self.lr=lr
+
+  def __call__(self, step):
+    print('进入了')
+    return self.lr(step)
         

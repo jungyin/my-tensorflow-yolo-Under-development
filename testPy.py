@@ -34,6 +34,8 @@ meminfo = pynvml.nvmlDeviceGetMemoryInfo(handle)
 
 bce = tf.losses.BinaryCrossentropy(from_logits = True)
 
+print(torch.__version__)
+print(torch.cuda.is_available())
 
 write =tf.io.TFRecordWriter('./tf2.tfrecords')
 

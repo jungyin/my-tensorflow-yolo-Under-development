@@ -126,6 +126,9 @@ def compute_loss(preds, targets, model):
     #Focal loss 
     g = h['fl_gamma'] # focal loss gamma?gamma是什么
     
+    if(g > 0):
+        BCEcls,BCEobj = FocalLoss(BCEcls,g),FocalLoss(BCEobj,g)
+    
     #Losses 计算1
     nt = 0 #标签数量，number targets
     no = len(preds) # 输出数量,number output
