@@ -27,7 +27,7 @@ import threading
 from utils.autoanchor import check_anchors
 from utils.plots import plot_labels,plot_images
 from utils.face_datasets import create_dataloader
-from models.yolo import Model
+from models.yolo import MyModel
 from models.common import NoneLayer
 from utils.general import init_seeds,check_dataset,check_img_size,print_mutation,set_logging,check_file,increment_path,labels_to_class_weights
 from utils.google_utils import attempt_download
@@ -39,7 +39,7 @@ import gc
 
 
 import os
-# os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
+os.environ['CUDA_VISIBLE_DEVICES'] = '-1'
 
 print('gpu可用',end='')
 print(tf.test.is_gpu_available)
@@ -112,14 +112,14 @@ def train(hyp,opt,wandb=None):
             # 如果在配置表里有anchors，就更换掉model中已有的anchors
             ckpt['model'].yaml['anchors'] = round(hyp['anchors'])
         # 初始化model
-        model = Model(opt.cfg or ckpt['model'].yaml,ch=3,nc=nc,format=opt.format)
+        model = MyModel(opt.cfg or ckpt['model'].yaml,ch=3,nc=nc,format=opt.format)
         exclude = ['anchor'] if opt.cfg or hyp.get('anchors') else[]
         state_dict = ckpt['model'].float().state_dict# 将配置表中配的参修改为float类型
         state_dict = intersect_dicts(state_dict,strict=False)
         # model.load_state_dict(state_dict,strict=False)
         
     else:
-        model = Model(opt.cfg,ch=3,batch_size=opt.batch_size,img_size=opt.img_size,nc=nc,format=opt.format)
+        model = MyModel(opt.cfg,ch=3,batch_size=opt.batch_size,img_size=opt.img_size,nc=nc,format=opt.format)
     
   
     
@@ -257,7 +257,7 @@ def train(hyp,opt,wandb=None):
             # if rank != -1 :
                 # indices = np.array[dataset.indices] if rank == 0 else np.zeros(dataset.n,dtype=np.int8)
         
-        mloss = np.zeros(5)    
+        mloss = np.zeros([5,1])    
         logger.info(('\n' + '%10s' * 9) % ('Epoch', 'gpu_mem', 'box', 'obj', 'cls', 'landmark', 'total', 'targets', 'img_size'))
         # dataset len
       
@@ -322,18 +322,19 @@ def train(hyp,opt,wandb=None):
                 
             #Forward
             with tf.GradientTape() as gt:
-             
-                pred = model(imgs)
+                gt.watch(model.trainable_variables)
                 
+                pred = model(imgs)
+               
                 
                 loss, loss_items = compute_loss(pred,targets,model)
                
               
                 if rank != -1 :
-                # gradient averaged between devices in DDP mode
+                # gradient averaged between devices in DDP mode5
                 # ddp模式下需要配置设备间的梯度平均值
                     loss *= opt.world_size 
-                
+               
                 grads = gt.gradient(loss,model.trainable_variables)
                 
                 grads = tf.distribute.get_replica_context().all_reduce('sum', grads)

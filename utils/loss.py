@@ -112,8 +112,8 @@ def compute_loss(preds, targets, model):
     tcls, tbox, indices, anchors, tlandmarks, lmks_mask = build_targets(preds, targets, model)
     h = model.hyp
     
-    BCEcls = losses.BinaryCrossentropy(from_logits = True) 
-    BCEobj = losses.BinaryCrossentropy(from_logits = True)
+    BCEcls = losses.BinaryCrossentropy(from_logits = False) 
+    BCEobj = losses.BinaryCrossentropy(from_logits = False)
     
     
     clsWeights = np.array([h['cls_pw']])
@@ -149,13 +149,14 @@ def compute_loss(preds, targets, model):
             pred_set = pred.numpy()[img,a,gy,gx].astype(np.float32) # prediction subset corresponding to targets
             
             pred_xy = tf.sigmoid(pred_set[:, :2]) * 2 - 0.5
-            pred_wh = (tf.sigmoid(pred_set[:, :2]) * 2) ** 2 * anchors[i]
+            pred_wh = (tf.sigmoid(pred_set[:, 2:4]) * 2) ** 2 * anchors[i]
             
             pred_box = tf.concat((pred_xy,pred_wh),1) #将宽高合并为一个box
             
-            iou = bbox_iou(tf.transpose(pred_box),tf.transpose(tbox[i]),x1y1x2y2=False,CIoU=True)
-            
-            niou = iou.numpy()
+            iou = bbox_iou(tf.transpose(pred_box),tf.transpose(tbox[i]),x1y1x2y2=False,EIoU=True)
+              
+            max = np.max(iou)
+            min = np.min(iou)
             
             lbox += np.mean(1.0 - iou)# mean是取均值，别tm百度了 ,另外因为每个iou都必定减一，所以在外面减，不在里面减了
             
@@ -163,14 +164,17 @@ def compute_loss(preds, targets, model):
             # 还是不懂pytorch的detach，这个是相当于clone?
             #这个，应该就是所谓的惩罚了把？
             #?奇怪，这玩意咋赋值的？
+            max = tf.reduce_max(iou,-1)
+            if(max<0):
+                max = tf.reduce_max(iou,-1)
             t_obj[img, a, gy, gx] = (1.0 - model.gr) + (model.gr * tf.clip_by_value(iou,0,tf.reduce_max(iou,-1)))
-      
+            bb=iou.numpy()
             
             # Classification 分类
             if model.nc > 1: #cls loss (only if mutiple classes) 计算class的loss（只有在多个分类的情况下才会使用）
                 t = np.full_like(pred_set[:, 15:],cn) # targets
                 t[range(for_nt), tcls[i]] = cp  
-                lcls += BCEcls(pred_set[:,15:],t,clsWeights) # bce
+                lcls += BCEcls(t,tf.sigmoid(pred_set[:,15:]),sample_weight=clsWeights) # bce
               
             
             plandmarks = pred_set[:,5:15]
@@ -183,8 +187,14 @@ def compute_loss(preds, targets, model):
           
             
             lmark += landmarks_loss(plandmarks, tlandmarks[i], lmks_mask[i])
-     
-        loss_obj += BCEobj(pred[..., 4],t_obj,objWeights) * balance[i]
+    
+        cc = t_obj[0][0][0]
+        
+        max = np.max(t_obj)
+        min = np.min(t_obj)
+        obj = BCEobj(t_obj,tf.sigmoid(pred[..., 4]),sample_weight=objWeights)
+        loss_obj += obj * balance[i]
+        
         
     s = 3 / no
     
@@ -199,7 +209,7 @@ def compute_loss(preds, targets, model):
     
     loss = lbox + loss_obj + lcls + lmark
     
-    return loss * bs , np.array((lbox[0],loss_obj[0],lcls,lmark,loss[0]),dtype=np.float32)
+    return loss * bs , np.array([lbox,loss_obj,lcls,lmark,loss],dtype=np.float32)
     
         
 def is_parallel(model):
@@ -220,7 +230,7 @@ class FocalLoss(keras.Model):
 
     def call(self, pred, true):
         #这部分后面得再回来看看，毕竟函数还是不太懂
-        loss = self.loss_fcn(pred, true)
+        loss = self.loss_fcn( true,pred)
         # p_t = torch.exp(-loss)
         # loss *= self.alpha * (1.000001 - p_t) ** self.gamma  # non-zero power for gradient stability
 

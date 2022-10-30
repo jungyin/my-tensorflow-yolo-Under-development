@@ -327,6 +327,5 @@ class MyLRSchedule(tf.keras.optimizers.schedules.LearningRateSchedule):
     self.lr=lr
 
   def __call__(self, step):
-    print('进入了')
     return self.lr(step)
         

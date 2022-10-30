@@ -7,9 +7,8 @@ import time
 from pathlib import Path
 from threading import Thread
 from warnings import warn
-import numpy as np
-from tqdm import tqdm
 
+import numpy as np
 import torch.distributed as dist
 import torch.nn as nn
 import torch.nn.functional as F
@@ -20,7 +19,7 @@ import yaml
 from torch.cuda import amp
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.tensorboard import SummaryWriter
-
+from tqdm import tqdm
 
 import test  # import test.py to get mAP after each epoch
 from models.experimental import attempt_load
@@ -38,8 +37,7 @@ from utils.torch_utils import ModelEMA, select_device, intersect_dicts, torch_di
 logger = logging.getLogger(__name__)
 
 try:
-    # import wandb
-    wandb = None
+    import wandb
 except ImportError:
     wandb = None
     logger.info("Install Weights & Biases for experiment logging via 'pip install wandb' (recommended)")
@@ -76,7 +74,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     nc = 1 if opt.single_cls else int(data_dict['nc'])  # number of classes
     names = ['item'] if opt.single_cls and len(data_dict['names']) != 1 else data_dict['names']  # class names
     assert len(names) == nc, '%g names found for nc=%g dataset in %s' % (len(names), nc, opt.data)  # check
-    
+
     # Model
     pretrained = weights.endswith('.pt')
     if pretrained:
@@ -101,6 +99,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
         if any(x in k for x in freeze):
             print('freezing %s' % k)
             v.requires_grad = False
+
     # Optimizer
     nbs = 64  # nominal batch size
     accumulate = max(round(nbs / total_batch_size), 1)  # accumulate loss before optimizing
@@ -129,8 +128,6 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     # https://pytorch.org/docs/stable/_modules/torch/optim/lr_scheduler.html#OneCycleLR
     lf = lambda x: ((1 + math.cos(x * math.pi / epochs)) / 2) * (1 - hyp['lrf']) + hyp['lrf']  # cosine
     scheduler = lr_scheduler.LambdaLR(optimizer, lr_lambda=lf)
-    
-    
     # plot_lr_scheduler(optimizer, scheduler, epochs)
 
     # Logging
@@ -191,9 +188,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
                                             hyp=hyp, augment=True, cache=opt.cache_images, rect=opt.rect, rank=rank,
                                             world_size=opt.world_size, workers=opt.workers,
                                             image_weights=opt.image_weights)
-    
     mlc = np.concatenate(dataset.labels, 0)[:, 0].max()  # max label class
-  
     nb = len(dataloader)  # number of batches
     assert mlc < nc, 'Label class %g exceeds nc=%g in %s. Possible class labels are 0-%g' % (mlc, nc, opt.data, nc - 1)
 
@@ -233,7 +228,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
     maps = np.zeros(nc)  # mAP per class
     results = (0, 0, 0, 0, 0, 0, 0)  # P, R, mAP@.5, mAP@.5-.95, val_loss(box, obj, cls)
     scheduler.last_epoch = start_epoch - 1  # do not move
-    scaler = amp.GradScaler(enabled=cuda) # 混合精度？
+    scaler = amp.GradScaler(enabled=cuda)
     logger.info('Image sizes %g train, %g test\n'
                 'Using %g dataloader workers\nLogging results to %s\n'
                 'Starting training for %g epochs...' % (imgsz, imgsz_test, dataloader.num_workers, save_dir, epochs))
@@ -333,7 +328,7 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
         scheduler.step()
 
         # DDP process 0 or single-GPU
-        if rank in [-1, 0] and epoch >= 1:
+        if rank in [-1, 0] and epoch > 20:
             # mAP
             if ema:
                 ema.update_attr(model, include=['yaml', 'nc', 'hyp', 'gr', 'names', 'stride', 'class_weights'])
@@ -434,17 +429,14 @@ def train(hyp, opt, device, tb_writer=None, wandb=None):
 
 
 if __name__ == '__main__':
-    
-   
-    
     parser = argparse.ArgumentParser()
     parser.add_argument('--weights', type=str, default='weights/yolov5s.pt', help='initial weights path')
     parser.add_argument('--cfg', type=str, default='models/yolov5s.yaml', help='model.yaml path')
     parser.add_argument('--data', type=str, default='data/widerface.yaml', help='data.yaml path')
     parser.add_argument('--hyp', type=str, default='data/hyp.scratch.yaml', help='hyperparameters path')
-    parser.add_argument('--epochs', type=int, default=40)
-    parser.add_argument('--batch-size', type=int, default=36, help='total batch size for all GPUs')
-    parser.add_argument('--img-size', nargs='+', type=int, default=[320, 320], help='[train, test] image sizes')
+    parser.add_argument('--epochs', type=int, default=250)
+    parser.add_argument('--batch-size', type=int, default=16, help='total batch size for all GPUs')
+    parser.add_argument('--img-size', nargs='+', type=int, default=[800, 800], help='[train, test] image sizes')
     parser.add_argument('--rect', action='store_true', help='rectangular training')
     parser.add_argument('--resume', nargs='?', const=True, default=False, help='resume most recent training')
     parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
@@ -452,18 +444,12 @@ if __name__ == '__main__':
     parser.add_argument('--noautoanchor', action='store_true', help='disable autoanchor check')
     parser.add_argument('--evolve', action='store_true', help='evolve hyperparameters')
     parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
-    
-    parser.add_argument('--cache-images', action='store_true',default=False, help='cache images for faster training')
-    # 是否使用先前已有的权重文件进行训练，默认是使用
+    parser.add_argument('--cache-images', action='store_true', help='cache images for faster training')
     parser.add_argument('--image-weights', action='store_true', help='use weighted image selection for training')
-    # 用那个设备做训练，torch在我的这种垃圾显卡上会提示性能不够不给用，所以这里用cpu
-    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
-    # （可能）训练过程中图片的缩放范围
+    parser.add_argument('--device', default='', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--multi-scale', action='store_true', default=False, help='vary img-size +/- 50%%')
     parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
-    # 是否使用adam
     parser.add_argument('--adam', action='store_true', help='use torch.optim.Adam() optimizer')
-    # 是否使用SyncBatchNorm，这是torch特有的一个多线程优化用的同步的bn
     parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
     parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
     parser.add_argument('--log-imgs', type=int, default=16, help='number of images for W&B logging, max 100')

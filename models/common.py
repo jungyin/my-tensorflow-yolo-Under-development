@@ -381,8 +381,8 @@ class Detect(layers.Layer):
         
         self.grid = [tf.zeros(1)] * self.nl #init grid
         
-        self.anchors = tf.convert_to_tensor(np.reshape(anchors,(self.nl,-1,2) ),dtype=tf.float32)
-        self.anchors_grid = tf.convert_to_tensor(np.reshape(self.anchors,(self.nl,1,-1,1,1,2)),dtype=tf.float32)
+        self.anchors = tf.convert_to_tensor(np.reshape(anchors,(self.nl,-1,2)),dtype=tf.float32)
+        self.anchors_grid = tf.convert_to_tensor(tf.reshape(self.anchors,(self.nl,1,-1,1,1,2)),dtype=tf.float32)
         self.m = [layers.Conv2D(self.no * self.na,1,data_format=conv2d_data_format,use_bias=True,bias_initializer='zeros') for x in ch] 
         # self.conv = layers.Conv2D(self.no * self.na,1,data_format=conv2d_data_format,use_bias=True,bias_initializer='zeros')
     def build(self,input_shape):
@@ -413,6 +413,7 @@ class Detect(layers.Layer):
                     self.grid[i],self.anchors_grid[i] = self._make_grid_new(nx,ny,i)
                 # 将conv的
                 y = np.full_like(x[i],0)
+
             
                 y = y +tf.concat((tf.math.sigmoid(x[i][:,:,:,:,0:5]),tf.concat((x[i][:,:,:,:,5:15],tf.math.sigmoid(x[i][:,:,:,:,:,15:15+self.nc])),4)),4)
                 box_xy = (y[:,:,:,:,0:2]*2. - 0.5 + self.grid[i]) * self.stride[i]
@@ -440,6 +441,7 @@ class Detect(layers.Layer):
             else:
                 bs,_,ny,nx = x[i].shape # x(bs,255,20,20) to x(bs,3,20,20,85)
                 
+          
             
             # 将x[i]重新编辑成 anchor输，输出条目类型和宽高
             # 用transposse将模型输出由bs,先验框数量，nc数量，宽高，变成bs,先验框数量，宽高，nc数量
@@ -451,27 +453,27 @@ class Detect(layers.Layer):
 
             # tensorflow没有明确的训练和校对方法，但torch有，所以这里不用管先
             # 如果不是已经进入训练中，那就要先吧传入的值归零一下
-            # if not self.training:
-            #     # 先看看宽高是否正常，不正常重新计算宽高
-            #     if self.grid[i].shape[2:4] !=x[i].shape[2:4]:
-            #         self.grid[i] = self._make_grid(nx,ny)
+            if not self.trainable:
+                # 先看看宽高是否正常，不正常重新计算宽高
+                if self.grid[i].shape[2:4] !=x[i].shape[2:4]:
+                    self.grid[i] = self._make_grid(nx,ny)
                 
-            #     y = np.full_like(x[i],0)
-            #     class_range = list(range(5)) + list(range(15,15+self.nc))
-            #     y[...,class_range] = tf.sigmoid(x[i][...,class_range])
-            #     y[..., 5:15] = x[i][...,5:15]
+                y = np.full_like(x[i],0)
+                class_range = list(range(5)) + list(range(15,15+self.nc))
+                y[...,class_range] = tf.sigmoid(x[i][...,class_range])
+                y[..., 5:15] = x[i][...,5:15]
                 
-            #     # 这个应该是还原图片本身全部的宽高处理？或者是，获取图片的中心点位置？
-            #     y[..., 0:2] = (y[..., 0:2] * 2 -  0.5 +self.grid[i]) * self.stride[i] #xy
-            #     y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchors_grid[i] #wh
+                # 这个应该是还原图片本身全部的宽高处理？或者是，获取图片的中心点位置？
+                y[..., 0:2] = (y[..., 0:2] * 2 -  0.5 +self.grid[i]) * self.stride[i] #xy
+                y[..., 2:4] = (y[..., 2:4] * 2) ** 2 * self.anchors_grid[i] #wh
                 
-            #     y[..., 5:7] = y[..., 5:7] * self.anchors_grid[i] * self.grid[i] * self.stride[i]     #landmark x1 y1
-            #     y[..., 7:9] = y[..., 7:9] * self.anchors_grid[i] * self.grid[i] * self.stride[i]     #landmark x2 y2
-            #     y[..., 9:11] = y[..., 9:11] * self.anchors_grid[i] * self.grid[i] * self.stride[i]   #landmark x3 y3
-            #     y[..., 11:13] = y[..., 11:13] * self.anchors_grid[i] * self.grid[i] * self.stride[i] #landmark x4 y4
-            #     y[..., 13:15] = y[..., 13:15] * self.anchors_grid[i] * self.grid[i] * self.stride[i] #landmark x5 y5
+                y[..., 5:7] = y[..., 5:7] * self.anchors_grid[i] * self.grid[i] * self.stride[i]     #landmark x1 y1
+                y[..., 7:9] = y[..., 7:9] * self.anchors_grid[i] * self.grid[i] * self.stride[i]     #landmark x2 y2
+                y[..., 9:11] = y[..., 9:11] * self.anchors_grid[i] * self.grid[i] * self.stride[i]   #landmark x3 y3
+                y[..., 11:13] = y[..., 11:13] * self.anchors_grid[i] * self.grid[i] * self.stride[i] #landmark x4 y4
+                y[..., 13:15] = y[..., 13:15] * self.anchors_grid[i] * self.grid[i] * self.stride[i] #landmark x5 y5
 
-            #     z.append(tf.reshape(y,(bs,-1,self.no)))
+                z.append(tf.reshape(y,(bs,-1,self.no)))
         return x #if self.training else (tf.concat(z,1),x)
                 
                 
@@ -485,7 +487,8 @@ class Detect(layers.Layer):
         # d=self.anchors[i].device
         # 网格网络生成
         # 这个地方必须传ij，不然生成的和预要的不一样
-        yv,xv = tf.meshgrid(np.array([np.arange(ny,dtype=tf.float32),np.arange(nx,dtype=tf.float32)]),indexing='ij')
+        
+        yv,xv = tf.meshgrid(tf.convert_to_tensor([ny,nx],dtype=tf.float32),indexing='ij')
         # 拼接数组，与cat不同的是，cat会把多个一维数组拼成一个长一维数组，stack是把n个一维数组拼成n维数组
         grid = tf.stack((xv,yv),2)
         #将拼接后的数组再次reshape成？？？

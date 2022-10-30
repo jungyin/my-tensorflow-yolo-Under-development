@@ -10,7 +10,7 @@ import yaml
 import logging
 from utils.metrics import fitness
 from utils.tensorflow_utils import init_tensorflow_seeds,download_url_to_file
-
+import argparse
 from utils.google_utils import gsutil_getsize
 
 # 随机数种子生成器
@@ -215,8 +215,8 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, EIoU
     
     # Intersection area
     # 获取box1和box2的交叉区域,的面积
-    inter = (tf.minimum(b1_x2, b2_x2) - tf.maximum(b1_x1, b2_x1)) * \
-            (tf.minimum(b1_y1, b2_y1) - tf.maximum(b1_y1, b2_y1))
+    inter = tf.minimum((tf.minimum(b1_x2, b2_x2) - tf.maximum(b1_x1, b2_x1)),0) * \
+            tf.minimum((tf.minimum(b1_y2, b2_y2) - tf.maximum(b1_y1, b2_y1)),0)
     
     #重新获取box1和box2的宽高
     w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1
@@ -224,13 +224,20 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, EIoU
     unio = (w1 * h1) + (w2 * h2) #计算box1和box2的面积之和，奇怪，要干嘛
     
     iou = inter / unio # 计算交叉区域和重叠区域相除，得到的值必定为0到1之间，这样就完成了iou的计算（然而还是不懂iou要用来干嘛）
+
+        
+    ass=np.max(iou)
+    aa=np.min(iou)
     
+        
     if GIoU or DIoU or CIoU or EIoU:
         # convex (smallest enclosing box) width 
         # 计算最外面大box的宽高
         c_w = tf.maximum(b1_x2,b2_x2) - tf.minimum(b1_x1,b2_x1)
         c_h = tf.maximum(b1_y2,b2_y2) - tf.minimum(b1_y1,b2_y1)
+
         
+    
         # 考虑替换为EIOU,eiou教程https://blog.csdn.net/q1552211/article/details/124590458
         if CIoU or DIoU or EIoU: # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1 # 看起来Ciou和dIou似乎是近亲啊？
             c2 = c_w ** 2 + c_h ** 2 + eps # c2 是全名是啥？,这个东西应该计算最大box的斜边，但为啥叫c2？ 他的值是最外面最大box的平方加高的平方，为了尽可能让俩个框重合，最后加个eps防止为0 
@@ -257,6 +264,8 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, EIoU
                     (atan ** 2)#这样写也可以  v是用来衡量anchor和目标框一致度的值，奇怪，那为啥要做平方化？为啥要和一个奇怪处理后的pi乘？ #计算俩个box的长款比相似性
                     # tf.pow(atan, np.full_like(atan,2))#?这里。是吧宽高比给平方化了？
                 alpha = v / ((1 + eps) - iou + v) # ？奇怪，alpha是什么？用1减去现在算出来的iou,然后加上v？这是干嘛？
+                
+                
                 return iou - ((rho2 / c2) + (v * alpha))  # CIoU 
 
             elif MCIoU: #这个不用百度，是我自己根据EIoU想的CIoU,因为感觉CIoU还是奇奇怪怪的，所以这里用我自己的思路再弄一次
@@ -294,4 +303,46 @@ def bbox_iou(box1, box2, x1y1x2y2=True, GIoU=False, DIoU=False, CIoU=False, EIoU
         
     
     
+def loadOpt():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--weights', type=str, default='weights/yolov5s.pt', help='initial weights path')
+    parser.add_argument('--cfg', type=str, default='models/yolov5s.yaml', help='model.yaml path')
+    parser.add_argument('--data', type=str, default='data/widerface.yaml', help='data.yaml path')
+    parser.add_argument('--hyp', type=str, default='data/hyp.scratch.yaml', help='hyperparameters path')
+    parser.add_argument('--epochs', type=int, default=1)
+    parser.add_argument('--batch-size', type=int, default=40, help='total batch size for all GPUs')
+    parser.add_argument('--img-size', nargs='+', type=int, default=[256, 256], help='[train, test] image sizes')
+    parser.add_argument('--rect', action='store_true', help='rectangular training')
+    parser.add_argument('--resume', nargs='?', const=False, default=False, help='resume most recent training')
+    parser.add_argument('--nosave', action='store_true', help='only save final checkpoint')
+    parser.add_argument('--notest', action='store_true', help='only test final epoch')
+    parser.add_argument('--noautoanchor', action='store_true', help='disable autoanchor check')
+    parser.add_argument('--evolve', action='store_true', help='evolve hyperparameters')
+    parser.add_argument('--bucket', type=str, default='', help='gsutil bucket')
+
+    parser.add_argument('--cache-images', action='store_true',default=False, help='cache images for faster training')
+    # 是否使用先前已有的权重文件进行训练，默认是使用
+    parser.add_argument('--image-weights', action='store_true', help='use weighted image selection for training')
+    # 用那个设备做训练，torch在我的这种垃圾显卡上会提示性能不够不给用，所以这里用cpu
+    parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
+    # （可能）训练过程中图片的缩放范围
+    parser.add_argument('--multi-scale', action='store_true', default=False, help='vary img-size +/- 50%%')
+    parser.add_argument('--single-cls', action='store_true', help='train multi-class data as single-class')
+    # 是否使用adam
+    parser.add_argument('--adam', action='store_true', help='use torch.optim.Adam() optimizer')
+    # 是否使用SyncBatchNorm，这是torch特有的一个多线程优化用的同步的bn
+    parser.add_argument('--sync-bn', action='store_true', help='use SyncBatchNorm, only available in DDP mode')
+    parser.add_argument('--local_rank', type=int, default=-1, help='DDP parameter, do not modify')
+    parser.add_argument('--log-imgs', type=int, default=16, help='number of images for W&B logging, max 100')
+    parser.add_argument('--log-artifacts', action='store_true', help='log artifacts, i.e. final trained model')
+    parser.add_argument('--workers', type=int, default=4, help='maximum number of dataloader workers')
+    parser.add_argument('--project', default='runs/train', help='save to project/name')
+    parser.add_argument('--name', default='exp', help='save to project/name')
+    parser.add_argument('--format', default='NHWC', help='save to project/name')
+    parser.add_argument('--exist-ok', action='store_true', help='existing project/name ok, do not increment')
+    opt = parser.parse_args()
     
+    opt.total_batch_size = opt.batch_size
+    opt.world_size = int(os.environ['WORLD_SIZE']) if 'WORLD_SIZE' in os.environ else 1
+    opt.global_rank = int(os.environ['RANK']) if 'RANK' in os.environ else -1
+    return opt
